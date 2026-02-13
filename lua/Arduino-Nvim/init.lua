@@ -224,6 +224,9 @@ function M.check()
 	-- Command to compile in the current directory
 	local cmd = "arduino-cli compile --fqbn " .. M.board .. " " .. vim.fn.expand("%:p:h")
 
+	-- Buffer to collect stderr output until we know the exit code
+	local stderr_buffer = {}
+
 	-- Run the command asynchronously
 	vim.fn.jobstart(cmd, {
 		stdout_buffered = false,
@@ -233,21 +236,32 @@ function M.check()
 			end
 		end,
 		on_stderr = function(_, data)
-			-- Only append lines that contain actual content to avoid false errors
+			-- Buffer stderr lines until exit to determine if they are errors
 			if data then
-				local error_lines = {}
 				for _, line in ipairs(data) do
 					local cleaned_line = strip_ansi_codes(line)
 					if cleaned_line:match("%S") then -- Only consider non-empty, non-whitespace lines
-						table.insert(error_lines, "Error: " .. cleaned_line)
+						table.insert(stderr_buffer, cleaned_line)
 					end
-				end
-				if #error_lines > 0 then
-					M.append_to_buffer(error_lines, buf, win, opts)
 				end
 			end
 		end,
 		on_exit = function(_, exit_code)
+			-- Display buffered stderr with appropriate formatting based on exit code
+			if #stderr_buffer > 0 then
+				local lines = {}
+				for _, line in ipairs(stderr_buffer) do
+					if exit_code == 0 then
+						-- Success: show stderr as plain informational output
+						table.insert(lines, line)
+					else
+						-- Failure: prefix with "Error: "
+						table.insert(lines, "Error: " .. line)
+					end
+				end
+				M.append_to_buffer(lines, buf, win, opts)
+			end
+
 			if exit_code == 0 then
 				M.append_to_buffer({ "--- Code checked successfully. ---" }, buf, win, opts)
 			else
@@ -287,6 +301,9 @@ function M.compile()
 		sketch_dir
 	)
 
+	-- Buffer to collect stderr output until we know the exit code
+	local stderr_buffer = {}
+
 	-- Run the command asynchronously
 	vim.fn.jobstart(cmd, {
 		stdout_buffered = false,
@@ -296,21 +313,32 @@ function M.compile()
 			end
 		end,
 		on_stderr = function(_, data)
-			-- Only append lines that contain actual content to avoid false errors
+			-- Buffer stderr lines until exit to determine if they are errors
 			if data then
-				local error_lines = {}
 				for _, line in ipairs(data) do
 					local cleaned_line = strip_ansi_codes(line)
 					if cleaned_line:match("%S") then -- Only consider non-empty, non-whitespace lines
-						table.insert(error_lines, "Error: " .. cleaned_line)
+						table.insert(stderr_buffer, cleaned_line)
 					end
-				end
-				if #error_lines > 0 then
-					M.append_to_buffer(error_lines, buf, win, opts)
 				end
 			end
 		end,
 		on_exit = function(_, exit_code)
+			-- Display buffered stderr with appropriate formatting based on exit code
+			if #stderr_buffer > 0 then
+				local lines = {}
+				for _, line in ipairs(stderr_buffer) do
+					if exit_code == 0 then
+						-- Success: show stderr as plain informational output
+						table.insert(lines, line)
+					else
+						-- Failure: prefix with "Error: "
+						table.insert(lines, "Error: " .. line)
+					end
+				end
+				M.append_to_buffer(lines, buf, win, opts)
+			end
+
 			if exit_code == 0 then
 				M.append_to_buffer({ "--- Compilation complete. Binaries saved to ./bin ---" }, buf, win, opts)
 			else
@@ -373,6 +401,9 @@ function M.upload()
 
 	-- Function to start upload after successful compilation
 	local function start_upload()
+		-- Buffer to collect stderr output until we know the exit code
+		local upload_stderr_buffer = {}
+
 		vim.fn.jobstart(upload_cmd, {
 			stdout_buffered = false,
 			on_stdout = function(_, data)
@@ -381,18 +412,30 @@ function M.upload()
 				end
 			end,
 			on_stderr = function(_, data)
-				if data and #data > 0 and data[1]:match("%S") then -- Only log if there is actual error content
-					M.append_to_buffer(
-						vim.tbl_map(function(line)
-							return "Error: " .. line
-						end, data),
-						buf,
-						win,
-						opts
-					)
+				-- Buffer stderr lines until exit to determine if they are errors
+				if data then
+					for _, line in ipairs(data) do
+						local cleaned_line = strip_ansi_codes(line)
+						if cleaned_line:match("%S") then
+							table.insert(upload_stderr_buffer, cleaned_line)
+						end
+					end
 				end
 			end,
 			on_exit = function(_, exit_code)
+				-- Display buffered stderr with appropriate formatting based on exit code
+				if #upload_stderr_buffer > 0 then
+					local lines = {}
+					for _, line in ipairs(upload_stderr_buffer) do
+						if exit_code == 0 then
+							table.insert(lines, line)
+						else
+							table.insert(lines, "Error: " .. line)
+						end
+					end
+					M.append_to_buffer(lines, buf, win, opts)
+				end
+
 				if exit_code == 0 then
 					M.append_to_buffer({ "--- Upload Complete ---" }, buf, win, opts)
 				else
@@ -406,6 +449,9 @@ function M.upload()
 		})
 	end
 
+	-- Buffer to collect stderr output until we know the exit code
+	local compile_stderr_buffer = {}
+
 	-- Start the compilation job
 	vim.fn.jobstart(compile_cmd, {
 		stdout_buffered = false,
@@ -415,18 +461,30 @@ function M.upload()
 			end
 		end,
 		on_stderr = function(_, data)
-			if data and #data > 0 and data[1]:match("%S") then -- Only log if there is actual error content
-				M.append_to_buffer(
-					vim.tbl_map(function(line)
-						return "Error: " .. line
-					end, data),
-					buf,
-					win,
-					opts
-				)
+			-- Buffer stderr lines until exit to determine if they are errors
+			if data then
+				for _, line in ipairs(data) do
+					local cleaned_line = strip_ansi_codes(line)
+					if cleaned_line:match("%S") then
+						table.insert(compile_stderr_buffer, cleaned_line)
+					end
+				end
 			end
 		end,
 		on_exit = function(_, exit_code)
+			-- Display buffered stderr with appropriate formatting based on exit code
+			if #compile_stderr_buffer > 0 then
+				local lines = {}
+				for _, line in ipairs(compile_stderr_buffer) do
+					if exit_code == 0 then
+						table.insert(lines, line)
+					else
+						table.insert(lines, "Error: " .. line)
+					end
+				end
+				M.append_to_buffer(lines, buf, win, opts)
+			end
+
 			if exit_code == 0 then
 				M.append_to_buffer({ "--- Compilation Complete, Starting Upload ---" }, buf, win, opts)
 				start_upload()
@@ -855,6 +913,9 @@ vim.api.nvim_create_user_command("InoUploadReset", function()
 		local upload_cmd = "arduino-cli upload -p " .. M.port .. " --fqbn " .. M.board .. " " .. vim.fn.expand("%:p:h")
 		M.append_to_buffer({ "Starting upload after reset..." }, buf, win, opts)
 
+		-- Buffer to collect stderr output until we know the exit code
+		local stderr_buffer = {}
+
 		vim.fn.jobstart(upload_cmd, {
 			stdout_buffered = false,
 			on_stdout = function(_, data)
@@ -863,18 +924,30 @@ vim.api.nvim_create_user_command("InoUploadReset", function()
 				end
 			end,
 			on_stderr = function(_, data)
-				if data and #data > 0 and data[1]:match("%S") then
-					M.append_to_buffer(
-						vim.tbl_map(function(line)
-							return "Error: " .. line
-						end, data),
-						buf,
-						win,
-						opts
-					)
+				-- Buffer stderr lines until exit to determine if they are errors
+				if data then
+					for _, line in ipairs(data) do
+						local cleaned_line = strip_ansi_codes(line)
+						if cleaned_line:match("%S") then
+							table.insert(stderr_buffer, cleaned_line)
+						end
+					end
 				end
 			end,
 			on_exit = function(_, exit_code)
+				-- Display buffered stderr with appropriate formatting based on exit code
+				if #stderr_buffer > 0 then
+					local lines = {}
+					for _, line in ipairs(stderr_buffer) do
+						if exit_code == 0 then
+							table.insert(lines, line)
+						else
+							table.insert(lines, "Error: " .. line)
+						end
+					end
+					M.append_to_buffer(lines, buf, win, opts)
+				end
+
 				if exit_code == 0 then
 					M.append_to_buffer({ "--- Upload with reset Complete ---" }, buf, win, opts)
 				else
